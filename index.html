@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Joko Absensi</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Babel untuk React -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect } from 'https://esm.sh/react@18.2.0';
+        import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
+        import { Settings, Users, Plus, Save, Clock, CheckCircle, LayoutDashboard, Trash2, CalendarDays, Printer, X, AlertCircle, LogOut, Lock, User as UserIcon, ArrowLeft, UserMinus, UserPlus, Shield } from 'https://esm.sh/lucide-react@0.344.0';
+        
+        // Firebase Imports
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js';
+        import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js';
+        import { getFirestore, collection, doc, setDoc, addDoc, onSnapshot, deleteDoc } from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js';
+
+        // ==========================================
+        // FIREBASE CONFIGURATION ANDA (ASLI)
+        // ==========================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyA9aXzUB7rnwNEAe7XIWl1ym1PDSFevMhg",
+            authDomain: "absen-2b38f.firebaseapp.com",
+            projectId: "absen-2b38f",
+            storageBucket: "absen-2b38f.firebasestorage.app",
+            messagingSenderId: "696925605556",
+            appId: "1:696925605556:web:7be8b9429cf58f5e4091e1"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const myAppId = 'joko-absen-app';
+
+        function App() {
+            const [user, setUser] = useState(null);
+            
+            // State untuk Login Admin
+            const [isAuthenticated, setIsAuthenticated] = useState(localStorage.getItem('joko_admin_logged_in') === 'true');
+            const [showLoginForm, setShowLoginForm] = useState(false);
+            const [loginUser, setLoginUser] = useState('');
+            const [loginPass, setLoginPass] = useState('');
+            const [loginError, setLoginError] = useState('');
+
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [employees, setEmployees] = useState([]);
+            const [cycles, setCycles] = useState([]);
+            const [selectedCycleId, setSelectedCycleId] = useState('');
+            const [allAttendance, setAllAttendance] = useState({});
+            const [localInputs, setLocalInputs] = useState({});
+            const [viewWeek, setViewWeek] = useState(1); 
+            const [showPrintHint, setShowPrintHint] = useState(false);
+            
+            const [newEmpName, setNewEmpName] = useState('');
+            const [newEmpIsMandor, setNewEmpIsMandor] = useState(false);
+            const [newCycleStart, setNewCycleStart] = useState('');
+
+            // Auth
+            useEffect(() => {
+                signInAnonymously(auth).catch(err => console.error("Auth Error:", err));
+                const unsubscribe = onAuthStateChanged(auth, setUser);
+                return () => unsubscribe();
+            }, []);
+
+            // Fetch Data
+            useEffect(() => {
+                if (!user) return;
+                
+                const empRef = collection(db, 'artifacts', myAppId, 'public', 'data', 'employees');
+                const unsubEmp = onSnapshot(empRef, (snapshot) => {
+                    setEmployees(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                });
+
+                const cycleRef = collection(db, 'artifacts', myAppId, 'public', 'data', 'cycles');
+                const unsubCycle = onSnapshot(cycleRef, (snapshot) => {
+                    const cycleData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    cycleData.sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
+                    setCycles(cycleData);
+                    setSelectedCycleId(prev => (!prev && cycleData.length > 0) ? cycleData[0].id : prev);
+                });
+
+                const attRef = collection(db, 'artifacts', myAppId, 'public', 'data', 'attendance');
+                const unsubAtt = onSnapshot(attRef, (snapshot) => {
+                    const data = {};
+                    snapshot.forEach(doc => { data[doc.id] = doc.data(); });
+                    setAllAttendance(data);
+                });
+
+                return () => { unsubEmp(); unsubCycle(); unsubAtt(); };
+            }, [user]);
+
+            useEffect(() => {
+                const inputs = {};
+                Object.keys(allAttendance).forEach(date => {
+                    Object.keys(allAttendance[date]).forEach(empId => {
+                        inputs[`${date}_${empId}`] = allAttendance[date][empId];
+                    });
+                });
+                setLocalInputs(inputs);
+            }, [allAttendance]);
+
+            // Handlers Data Karyawan
+            const handleAddEmployee = async (e) => {
+                e.preventDefault();
+                if (!newEmpName.trim() || !user || !isAuthenticated) return;
+                await addDoc(collection(db, 'artifacts', myAppId, 'public', 'data', 'employees'), { 
+                    name: newEmpName.toUpperCase(), // Paksa huruf besar saat menyimpan
+                    isActive: true, 
+                    isMandor: newEmpIsMandor, 
+                    createdAt: new Date().toISOString() 
+                });
+                setNewEmpName('');
+                setNewEmpIsMandor(false);
+            };
+
+            const handleDeleteEmployee = async (empId) => {
+                if(user && isAuthenticated) {
+                    if(window.confirm("Yakin ingin menghapus data ini selamanya?")) {
+                        await deleteDoc(doc(db, 'artifacts', myAppId, 'public', 'data', 'employees', empId));
+                    }
+                }
+            };
+
+            const handleToggleActive = async (empId, currentStatus) => {
+                if (!user || !isAuthenticated) return;
+                const empRef = doc(db, 'artifacts', myAppId, 'public', 'data', 'employees', empId);
+                await setDoc(empRef, { isActive: !currentStatus }, { merge: true });
+            };
+
+            const handleToggleMandor = async (empId, currentStatus) => {
+                if (!user || !isAuthenticated) return;
+                const empRef = doc(db, 'artifacts', myAppId, 'public', 'data', 'employees', empId);
+                await setDoc(empRef, { isMandor: !currentStatus }, { merge: true });
+            };
+
+            const handleCreateCycle = async (e) => {
+                e.preventDefault();
+                if (!newCycleStart || !user || !isAuthenticated) return;
+                const start = new Date(newCycleStart);
+                const end = new Date(start); end.setDate(end.getDate() + 13);
+                const payDay = new Date(start); payDay.setDate(payDay.getDate() + 14);
+
+                await addDoc(collection(db, 'artifacts', myAppId, 'public', 'data', 'cycles'), {
+                    startDate: start.toISOString().split('T')[0],
+                    endDate: end.toISOString().split('T')[0],
+                    payDate: payDay.toISOString().split('T')[0],
+                    createdAt: new Date().toISOString()
+                });
+                setNewCycleStart('');
+            };
+
+            const handleInputChange = (empId, date, val) => {
+                if (!isAuthenticated) return;
+                setLocalInputs(prev => ({ ...prev, [`${date}_${empId}`]: val }));
+            };
+
+            const handleInputBlur = async (empId, date) => {
+                if (!user || !isAuthenticated) return;
+                const val = parseFloat(localInputs[`${date}_${empId}`]);
+                const attRef = doc(db, 'artifacts', myAppId, 'public', 'data', 'attendance', date);
+                if (isNaN(val) || val === '') await setDoc(attRef, { [empId]: 0 }, { merge: true });
+                else await setDoc(attRef, { [empId]: val }, { merge: true });
+            };
+
+            const handleKeyDown = (e, date, rowIndex) => {
+                if (!isAuthenticated) return;
+                if (e.key === 'Enter' || e.keyCode === 13) {
+                    e.preventDefault(); 
+                    const nextInput = document.getElementById(`input-${date}-${rowIndex + 1}`);
+                    if (nextInput) { nextInput.focus(); nextInput.select(); } 
+                    else e.target.blur();
+                }
+            };
+
+            const getRowTotal = (empId, allDates) => {
+                return allDates.reduce((total, date) => total + (parseFloat(allAttendance[date]?.[empId]) || 0), 0);
+            };
+
+            const getCycleDates = () => {
+                const cycle = cycles.find(c => c.id === selectedCycleId);
+                if (!cycle) return [];
+                const dates = [];
+                let curr = new Date(cycle.startDate);
+                const end = new Date(cycle.endDate);
+                while (curr <= end) { dates.push(curr.toISOString().split('T')[0]); curr.setDate(curr.getDate() + 1); }
+                return dates;
+            };
+
+            const cycleDates = getCycleDates();
+            const activeCycleObj = cycles.find(c => c.id === selectedCycleId);
+            const isMultiWeek = cycleDates.length > 7;
+            const displayedDates = isMultiWeek ? cycleDates.slice((viewWeek - 1) * 7, viewWeek * 7) : cycleDates;
+            const showTotalColumn = !isMultiWeek || viewWeek === 2;
+
+            // PENGURUTAN (SORTING) KARYAWAN SECARA ALFABET & MANDOR DI ATAS
+            const sortedEmployees = [...employees].sort((a, b) => {
+                if (a.isMandor && !b.isMandor) return -1;
+                if (!a.isMandor && b.isMandor) return 1;
+                return a.name.localeCompare(b.name);
+            });
+
+            const visibleEmployees = sortedEmployees.filter(emp => {
+                if (emp.isActive !== false) return true;
+                return getRowTotal(emp.id, cycleDates) > 0;
+            });
+
+            const activeEmployees = sortedEmployees.filter(e => e.isActive !== false);
+            const inactiveEmployees = sortedEmployees.filter(e => e.isActive === false);
+
+            const formatShortDate = (dateString) => {
+                const date = new Date(dateString);
+                const days = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+                return { day: days[date.getDay()], date: date.getDate() };
+            };
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                if (loginUser.toLowerCase() === 'bayu' && loginPass === '008') {
+                    setIsAuthenticated(true);
+                    localStorage.setItem('joko_admin_logged_in', 'true');
+                    setLoginError('');
+                    setShowLoginForm(false);
+                } else {
+                    setLoginError('Username atau Password salah!');
+                }
+            };
+
+            const handleLogout = () => {
+                setIsAuthenticated(false);
+                localStorage.removeItem('joko_admin_logged_in');
+                setLoginUser('');
+                setLoginPass('');
+                setActiveTab('dashboard');
+            };
+
+            const handlePrint = () => {
+                setShowPrintHint(true);
+                try { window.print(); } catch (e) { console.error(e); }
+                setTimeout(() => setShowPrintHint(false), 8000);
+            };
+
+            if (!user) return <div className="flex items-center justify-center h-screen bg-gray-50"><div className="text-lg font-medium text-blue-600 animate-pulse flex items-center gap-2"><Clock className="w-6 h-6 animate-spin" /> Memuat Sistem...</div></div>;
+
+            if (showLoginForm && !isAuthenticated) {
+                return (
+                    <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans">
+                        <div className="absolute top-4 left-4">
+                            <button onClick={() => setShowLoginForm(false)} className="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-bold bg-white px-4 py-2 rounded-xl shadow-sm border border-gray-200">
+                                <ArrowLeft className="w-5 h-5" /> Kembali
+                            </button>
+                        </div>
+                        <div className="sm:mx-auto sm:w-full sm:max-w-md mt-8">
+                            <div className="flex justify-center">
+                                <div className="bg-gradient-to-br from-blue-600 to-indigo-600 p-4 rounded-2xl text-white shadow-lg shadow-blue-500/30"><Lock className="w-10 h-10" /></div>
+                            </div>
+                            <h2 className="mt-6 text-center text-3xl font-black text-gray-900 tracking-tight uppercase">Login <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600">Admin</span></h2>
+                            <p className="mt-2 text-center text-sm font-medium text-gray-500">Masukkan kredensial untuk mengedit absensi</p>
+                        </div>
+                        <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md px-4 sm:px-0">
+                            <div className="bg-white py-8 px-6 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.1)] sm:rounded-2xl sm:px-10 border border-gray-100">
+                                <form className="space-y-6" onSubmit={handleLogin}>
+                                    {loginError && (
+                                        <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-md flex items-start gap-3"><AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" /><p className="text-sm text-red-700 font-bold">{loginError}</p></div>
+                                    )}
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-1.5 uppercase tracking-wide">Username</label>
+                                        <div className="relative rounded-xl shadow-sm">
+                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><UserIcon className="h-5 w-5 text-gray-400" /></div>
+                                            <input type="text" required value={loginUser} onChange={(e) => setLoginUser(e.target.value)} className="focus:ring-2 focus:ring-blue-500 focus:bg-white block w-full pl-10 sm:text-sm border-gray-200 rounded-xl py-3.5 bg-gray-50 border outline-none transition-all font-bold text-gray-800 uppercase" placeholder="Ketik username..." />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-1.5 uppercase tracking-wide">Password</label>
+                                        <div className="relative rounded-xl shadow-sm">
+                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Lock className="h-5 w-5 text-gray-400" /></div>
+                                            <input type="password" required value={loginPass} onChange={(e) => setLoginPass(e.target.value)} className="focus:ring-2 focus:ring-blue-500 focus:bg-white block w-full pl-10 sm:text-sm border-gray-200 rounded-xl py-3.5 bg-gray-50 border outline-none transition-all font-bold text-gray-800" placeholder="Ketik password..." />
+                                        </div>
+                                    </div>
+                                    <button type="submit" className="w-full flex justify-center py-3.5 px-4 border border-transparent rounded-xl shadow-lg shadow-blue-500/30 text-sm font-bold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 transition-all mt-4 uppercase tracking-wider">MASUK</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gray-50 font-sans pb-12 text-gray-800">
+                  <style>{`
+                    @media print {
+                      @page { size: portrait; margin: 5mm; } 
+                      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: white !important; margin: 0; padding: 0; font-family: Arial, sans-serif; }
+                      .no-print { display: none !important; } 
+                      .print-only { display: block !important; width: 100%; } 
+                      .print-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+                      .print-table th, .print-table td { border: 1px solid #000 !important; padding: 3px 1px !important; font-size: 8px !important; color: #000 !important; word-wrap: break-word; text-align: center; }
+                      .print-table th.col-no { width: 4%; }
+                      .print-table th.col-name { width: 16%; text-align: left; padding-left: 4px !important; font-size: 9px !important; text-transform: uppercase; }
+                      .print-table th.col-day { width: 5%; } 
+                      .print-table th.col-total { width: 10%; font-size: 9px !important; font-weight: bold; }
+                    }
+                    .print-only { display: none; }
+                    input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+                    input[type=number] { -moz-appearance: textfield; }
+                  `}</style>
+
+                  {/* Header */}
+                  <header className="no-print bg-white shadow-md sticky top-0 z-50">
+                    <div className="max-w-7xl mx-auto px-2 sm:px-6 h-16 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="bg-gradient-to-br from-blue-600 to-indigo-600 p-2 rounded-xl text-white shadow-lg shadow-blue-500/30"><CalendarDays className="w-5 h-5" /></div>
+                        <h1 className="text-lg font-black text-gray-900 hidden sm:block tracking-tight uppercase">Joko<span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600">Absensi</span></h1>
+                      </div>
+                      
+                      <div className="flex items-center gap-2 sm:gap-3">
+                        {/* Navigasi Utama dengan Gradasi jika aktif, Box jelas jika tidak aktif */}
+                        <div className="flex space-x-1 sm:space-x-2 bg-gray-100 p-1.5 rounded-2xl border border-gray-200 shadow-inner">
+                          <button onClick={() => setActiveTab('dashboard')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] sm:text-sm font-bold transition-all duration-300 ${activeTab === 'dashboard' ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/30' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 hover:text-blue-600 shadow-sm'}`}><LayoutDashboard className="w-3.5 h-3.5" /> Absen</button>
+                          {isAuthenticated && <button onClick={() => setActiveTab('karyawan')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] sm:text-sm font-bold transition-all duration-300 ${activeTab === 'karyawan' ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/30' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 hover:text-blue-600 shadow-sm'}`}><Users className="w-3.5 h-3.5" /> Karyawan</button>}
+                          {isAuthenticated && <button onClick={() => setActiveTab('siklus')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] sm:text-sm font-bold transition-all duration-300 ${activeTab === 'siklus' ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/30' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 hover:text-blue-600 shadow-sm'}`}><Settings className="w-3.5 h-3.5" /> Siklus</button>}
+                        </div>
+
+                        {isAuthenticated ? (
+                          <button onClick={handleLogout} className="bg-red-50 border border-red-200 text-red-600 p-2 rounded-xl hover:bg-red-500 hover:text-white transition-all shadow-sm" title="Keluar"><LogOut className="w-4 h-4 sm:w-5 sm:h-5" /></button>
+                        ) : (
+                          <button onClick={() => setShowLoginForm(true)} className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-3 py-1.5 rounded-xl hover:opacity-90 transition-all shadow-md shadow-blue-500/30 text-xs sm:text-sm font-bold flex items-center gap-1.5 uppercase tracking-wide"><Lock className="w-3.5 h-3.5" /> Admin</button>
+                        )}
+                      </div>
+                    </div>
+                  </header>
+
+                  <main className="no-print max-w-7xl mx-auto px-2 sm:px-6 py-6">
+                    {/* DASHBOARD */}
+                    {activeTab === 'dashboard' && (
+                      <div className="bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
+                        {!isAuthenticated && (
+                          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-3 text-center text-sm font-bold text-blue-800 border-b border-blue-200 flex justify-center items-center gap-2 uppercase tracking-wide"><AlertCircle className="w-4 h-4" /> Mode Akses Publik (Hanya Baca)</div>
+                        )}
+                        <div className="p-4 sm:p-5 bg-white border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4">
+                          <select value={selectedCycleId} onChange={(e) => { setSelectedCycleId(e.target.value); setViewWeek(1); }} className="w-full sm:w-64 border-2 border-gray-300 rounded-xl px-3 py-2.5 text-sm font-bold text-gray-800 bg-gray-50 hover:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all cursor-pointer">
+                            {cycles.length === 0 && <option value="">Belum ada siklus</option>}
+                            {cycles.map(c => <option key={c.id} value={c.id}>Tgl {new Date(c.startDate).toLocaleDateString('id-ID', {day: 'numeric', month:'short'})} - {new Date(c.endDate).toLocaleDateString('id-ID', {day: 'numeric', month:'short'})}</option>)}
+                          </select>
+                          
+                          <div className="flex w-full sm:w-auto gap-3">
+                            {/* Tombol Minggu 1 & Minggu 2 dengan Desain Sangat Jelas */}
+                            {isMultiWeek && (
+                              <div className="flex bg-gray-200 p-1.5 rounded-xl flex-1 sm:w-[240px] gap-1 border border-gray-300 shadow-inner">
+                                <button onClick={() => setViewWeek(1)} className={`flex-1 py-1.5 text-xs font-black rounded-lg transition-all duration-300 uppercase tracking-wide ${viewWeek === 1 ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-md' : 'bg-transparent text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'}`}>Minggu 1</button>
+                                <button onClick={() => setViewWeek(2)} className={`flex-1 py-1.5 text-xs font-black rounded-lg transition-all duration-300 uppercase tracking-wide ${viewWeek === 2 ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-md' : 'bg-transparent text-gray-600 hover:bg-white hover:shadow-sm hover:text-blue-600'}`}>Minggu 2</button>
+                              </div>
+                            )}
+                            {isAuthenticated && (
+                              <button onClick={handlePrint} disabled={cycleDates.length === 0} className="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-4 py-1.5 rounded-xl text-xs font-bold shadow-lg shadow-purple-500/30 hover:opacity-90 flex items-center gap-2 uppercase tracking-wide transition-all"><Printer className="w-4 h-4" /> <span className="hidden sm:inline">Cetak</span></button>
+                            )}
+                          </div>
+                        </div>
+
+                        {visibleEmployees.length === 0 ? <div className="p-12 text-center text-gray-500 text-sm font-bold uppercase">Tidak ada karyawan di siklus ini.</div> : cycleDates.length === 0 ? <div className="p-12 text-center text-gray-500 text-sm font-bold uppercase">Belum ada siklus aktif.</div> : (
+                          <div className="w-full">
+                            <table className="w-full text-xs text-left border-collapse table-fixed">
+                              <thead className="bg-gray-100 text-gray-700 border-b-2 border-gray-300">
+                                <tr>
+                                  <th className="px-2 py-3 border-r border-gray-300 font-black w-[80px] sm:w-[120px] align-bottom"><div className="text-[10px] text-gray-500 uppercase tracking-widest">Karyawan</div></th>
+                                  {displayedDates.map((date) => {
+                                    const { day, date: dateNum } = formatShortDate(date);
+                                    return (
+                                      <th key={date} className={`border-r border-gray-300 text-center p-0 align-middle ${day === 'Min' ? 'bg-red-100' : ''}`}>
+                                        <div className="text-[9px] uppercase font-black pt-2 opacity-70 tracking-widest">{day}</div>
+                                        <div className={`text-sm font-black pb-2 ${day === 'Min' ? 'text-red-600' : 'text-gray-900'}`}>{dateNum}</div>
+                                      </th>
+                                    );
+                                  })}
+                                  {showTotalColumn && <th className="border-l border-gray-300 font-black text-center w-[45px] sm:w-[60px] bg-indigo-600 text-white align-middle shadow-inner"><div className="text-[9px] pt-2 tracking-widest">TOT</div><div className="text-[10px] pb-2">JAM</div></th>}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {visibleEmployees.map((emp, index) => (
+                                  <tr key={emp.id} className={`bg-white border-b border-gray-200 hover:bg-blue-50/50 transition-colors ${emp.isActive === false ? 'opacity-70 bg-gray-50' : ''}`}>
+                                    <td className="px-2 py-1 border-r border-gray-300 font-bold text-gray-800 text-[11px] sm:text-[13px] truncate h-12 relative uppercase tracking-wide">
+                                        <div className="flex flex-col justify-center h-full">
+                                            <span className="truncate">{emp.name}</span>
+                                            {emp.isMandor && <span className="text-[9px] bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black px-1.5 py-0.5 rounded-sm inline-block w-max mt-0.5 shadow-sm tracking-widest">MANDOR</span>}
+                                            {emp.isActive === false && <span className="text-[9px] text-orange-600 font-black inline-block w-max mt-0.5 bg-orange-100 px-1 rounded">(NON-AKTIF)</span>}
+                                        </div>
+                                    </td>
+                                    {displayedDates.map((date, dateIdx) => {
+                                      const val = localInputs[`${date}_${emp.id}`];
+                                      return (
+                                        <td key={date} className="border-r border-gray-300 p-0 h-12 relative">
+                                          {isAuthenticated ? (
+                                            <input 
+                                              id={`input-${date}-${index}`} type="number" min="0" step="0.5" tabIndex={(dateIdx * visibleEmployees.length) + index + 1} enterKeyHint="next"
+                                              value={val === undefined || val === 0 ? '' : val}
+                                              onChange={(e) => handleInputChange(emp.id, date, e.target.value)}
+                                              onBlur={() => handleInputBlur(emp.id, date)}
+                                              onKeyDown={(e) => handleKeyDown(e, date, index)}
+                                              className={`w-full h-full absolute inset-0 text-center focus:bg-blue-100 focus:ring-inset focus:ring-2 focus:ring-blue-600 bg-transparent font-black text-[14px] sm:text-base outline-none transition-all ${emp.isMandor ? 'text-blue-900' : 'text-gray-900'}`}
+                                            />
+                                          ) : (
+                                            <div className={`w-full h-full absolute inset-0 flex items-center justify-center font-black text-[14px] sm:text-base ${emp.isMandor ? 'text-blue-900' : 'text-gray-800'}`}>{val || '-'}</div>
+                                          )}
+                                        </td>
+                                      )
+                                    })}
+                                    {showTotalColumn && <td className="border-l-2 border-gray-300 text-center font-black text-indigo-700 bg-indigo-50/50 text-xs sm:text-[15px]">{getRowTotal(emp.id, cycleDates) || '-'}</td>}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* KARYAWAN (KHUSUS ADMIN) */}
+                    {activeTab === 'karyawan' && isAuthenticated && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                        <div className="bg-white p-5 rounded-2xl shadow-lg border border-gray-200">
+                          <h2 className="text-base font-black mb-4 flex items-center gap-2 uppercase tracking-wide text-gray-800"><Users className="w-5 h-5 text-blue-600"/> Tambah Karyawan Baru</h2>
+                          <form onSubmit={handleAddEmployee} className="flex flex-col gap-3">
+                            <div className="flex gap-2 sm:gap-3">
+                                <input type="text" value={newEmpName} onChange={(e) => setNewEmpName(e.target.value.toUpperCase())} placeholder="NAMA LENGKAP..." className="flex-1 border-2 border-gray-300 rounded-xl px-4 py-2.5 text-sm font-bold uppercase tracking-wide outline-none bg-gray-50 focus:bg-white focus:border-blue-500 transition-all" />
+                                <button type="submit" disabled={!newEmpName.trim()} className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-2.5 rounded-xl font-black uppercase tracking-wider shadow-md shadow-blue-500/30 disabled:opacity-50">Simpan</button>
+                            </div>
+                            <label className="flex items-center gap-2 text-sm font-bold text-gray-700 cursor-pointer ml-1 bg-blue-50 w-max px-3 py-1.5 rounded-lg border border-blue-100">
+                                <input type="checkbox" checked={newEmpIsMandor} onChange={(e) => setNewEmpIsMandor(e.target.checked)} className="rounded text-blue-600 w-4 h-4 cursor-pointer" />
+                                JADIKAN <span className="text-blue-700 font-black tracking-widest">MANDOR</span>
+                            </label>
+                          </form>
+                        </div>
+                        <div className="bg-white p-5 rounded-2xl shadow-lg border border-gray-200">
+                          <h2 className="text-base font-black mb-4 uppercase tracking-wide text-gray-800 border-b-2 border-gray-100 pb-2">Karyawan Aktif ({activeEmployees.length})</h2>
+                          <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
+                            {activeEmployees.length === 0 && <p className="text-sm text-gray-400 font-bold uppercase">Belum ada karyawan aktif.</p>}
+                            {activeEmployees.map((emp) => (
+                              <div key={emp.id} className={`flex justify-between items-center p-3 border-2 rounded-xl transition-all ${emp.isMandor ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-100 hover:border-blue-300'}`}>
+                                <span className="font-black text-sm flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 uppercase tracking-wide text-gray-800">
+                                    {emp.name}
+                                    {emp.isMandor && <span className="text-[10px] bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black px-1.5 py-0.5 rounded uppercase tracking-widest shadow-sm">Mandor</span>}
+                                </span>
+                                <div className="flex gap-2">
+                                    <button onClick={() => handleToggleMandor(emp.id, emp.isMandor)} className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold border-2 transition-all ${emp.isMandor ? 'bg-white border-blue-300 text-blue-700 hover:bg-blue-100' : 'bg-gray-100 border-gray-200 text-gray-600 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200'}`} title={emp.isMandor ? "Cabut Mandor" : "Jadikan Mandor"}><Shield className="w-4 h-4" /></button>
+                                    <button onClick={() => handleToggleActive(emp.id, true)} className="flex items-center gap-1 text-orange-700 bg-orange-100 border-2 border-orange-200 px-2.5 py-1.5 rounded-lg text-xs font-bold hover:bg-orange-200" title="Pindah Proyek"><UserMinus className="w-4 h-4" /></button>
+                                    <button onClick={() => handleDeleteEmployee(emp.id)} className="text-red-600 bg-red-50 border-2 border-red-100 p-1.5 rounded-lg hover:bg-red-500 hover:text-white transition-colors" title="Hapus"><Trash2 className="w-4 h-4" /></button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          {inactiveEmployees.length > 0 && (
+                              <div className="mt-6 border-t-2 border-gray-200 pt-4">
+                                  <h2 className="text-xs font-black mb-3 text-gray-500 uppercase tracking-widest">Di Proyek Lain ({inactiveEmployees.length})</h2>
+                                  <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
+                                    {inactiveEmployees.map((emp) => (
+                                      <div key={emp.id} className="flex justify-between items-center p-3 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50">
+                                        <span className="font-black text-sm text-gray-400 line-through uppercase tracking-wide">{emp.name}</span>
+                                        <div className="flex gap-2">
+                                            <button onClick={() => handleToggleActive(emp.id, false)} className="flex items-center gap-1 text-green-700 bg-green-100 border-2 border-green-200 px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wide hover:bg-green-200"><UserPlus className="w-4 h-4" /> <span className="hidden sm:inline">Aktifkan</span></button>
+                                            <button onClick={() => handleDeleteEmployee(emp.id)} className="text-red-600 bg-red-50 border-2 border-red-100 p-1.5 rounded-lg hover:bg-red-500 hover:text-white transition-colors"><Trash2 className="w-4 h-4" /></button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                              </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* SIKLUS (KHUSUS ADMIN) */}
+                    {activeTab === 'siklus' && isAuthenticated && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                        <div className="bg-white p-5 rounded-2xl shadow-lg border border-gray-200">
+                          <h2 className="text-base font-black mb-2 flex items-center gap-2 uppercase tracking-wide text-gray-800"><CalendarDays className="w-5 h-5 text-indigo-600"/> Buat Siklus (14 Hari)</h2>
+                          <form onSubmit={handleCreateCycle} className="space-y-4 mt-4">
+                            <input type="date" value={newCycleStart} onChange={(e) => setNewCycleStart(e.target.value)} required className="w-full border-2 border-gray-300 rounded-xl px-4 py-3 text-sm font-bold uppercase outline-none bg-gray-50 focus:bg-white focus:border-indigo-500 transition-all" />
+                            <button type="submit" className="w-full bg-gradient-to-r from-gray-800 to-black text-white text-sm font-black uppercase tracking-widest py-3 rounded-xl flex justify-center items-center gap-2 shadow-lg hover:opacity-90 transition-all"><Save className="w-4 h-4" /> Simpan & Aktifkan</button>
+                          </form>
+                        </div>
+                        <div className="bg-white p-5 rounded-2xl shadow-lg border border-gray-200">
+                          <h2 className="text-base font-black mb-4 uppercase tracking-wide text-gray-800 border-b-2 border-gray-100 pb-2">Riwayat Siklus</h2>
+                          <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                            {cycles.map((cycle) => (
+                              <div key={cycle.id} className="p-4 border-2 border-gray-200 rounded-xl bg-gray-50 hover:bg-white hover:border-indigo-300 transition-all">
+                                <div className="text-sm font-black text-gray-800 uppercase tracking-wide">{new Date(cycle.startDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })} <span className="text-gray-400">s/d</span> {new Date(cycle.endDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</div>
+                                <div className="text-xs font-black text-indigo-600 mt-1 uppercase tracking-widest">Gajian: {new Date(cycle.payDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </main>
+
+                  {/* Notifikasi Print */}
+                  {showPrintHint && (
+                    <div className="no-print fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white p-4 rounded-2xl shadow-2xl z-[100] flex items-start gap-3 w-[90%] max-w-sm border-2 border-gray-700">
+                      <div className="text-sm flex-1">
+                        <p className="font-black mb-1 uppercase tracking-wide text-blue-400">Membuka PDF Cetak...</p>
+                        <p className="text-xs text-gray-300 font-medium">Jika pop-up tidak muncul, klik ikon Titik Tiga (⋮) di browser ➔ Pilih Bagikan ➔ Pilih Cetak / Print.</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* PRINT VIEW (KHUSUS ADMIN) */}
+                  {cycleDates.length > 0 && activeCycleObj && isAuthenticated && (
+                    <div className="print-only">
+                      <div style={{ textAlign: 'center', marginBottom: '10px', borderBottom: '2px solid black', paddingBottom: '5px' }}>
+                        <h1 style={{ fontSize: '14px', fontWeight: 'bold', textTransform: 'uppercase', margin: '0 0 2px 0' }}>Laporan Absensi Karyawan</h1>
+                        <p style={{ fontSize: '10px', margin: 0, fontWeight: 'bold' }}>PERIODE: {new Date(activeCycleObj.startDate).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()} S/D {new Date(activeCycleObj.endDate).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()}</p>
+                      </div>
+                      <table className="print-table">
+                        <thead>
+                          <tr>
+                            <th className="col-no" style={{ backgroundColor: '#e5e7eb' }}>NO</th>
+                            <th className="col-name" style={{ backgroundColor: '#e5e7eb' }}>NAMA KARYAWAN</th>
+                            {cycleDates.map(date => {
+                              const day = formatShortDate(date).day;
+                              return (
+                                <th key={`ph-${date}`} className="col-day" style={{ backgroundColor: day === 'Min' ? '#fecaca' : '#f3f4f6' }}>
+                                  <div style={{ fontSize: '7px' }}>{day}</div>
+                                  <div style={{ fontSize: '9px', fontWeight: 'bold' }}>{formatShortDate(date).date}</div>
+                                </th>
+                              );
+                            })}
+                            <th className="col-total" style={{ backgroundColor: '#d1d5db' }}>TOT<br/>JAM</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {visibleEmployees.map((emp, idx) => (
+                            <tr key={`pr-${emp.id}`}>
+                              <td style={{ fontWeight: 'bold' }}>{idx + 1}</td>
+                              <td style={{ fontWeight: 'bold', textAlign: 'left' }}>{emp.name} {emp.isMandor ? '(MANDOR)' : ''}</td>
+                              {cycleDates.map(date => (
+                                <td key={`pc-${date}`} style={{ fontWeight: 'bold', backgroundColor: formatShortDate(date).day === 'Min' ? '#fef2f2' : 'transparent', color: emp.isMandor ? '#1e3a8a' : '#000' }}>
+                                  {localInputs[`${date}_${emp.id}`] || ''}
+                                </td>
+                              ))}
+                              <td style={{ backgroundColor: '#f3f4f6', fontWeight: 'bold' }}>{getRowTotal(emp.id, cycleDates) || ''}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'flex-end', paddingRight: '20px' }}>
+                        <div style={{ textAlign: 'center' }}>
+                          <p style={{ fontSize: '10px', marginBottom: '40px', fontWeight: 'bold' }}>DISETUJUI OLEH,</p>
+                          <p style={{ fontSize: '10px', fontWeight: 'bold', borderBottom: '1px solid black', padding: '0 20px', display: 'inline-block' }}>PIMPINAN / ADMIN</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+            );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
+
+
